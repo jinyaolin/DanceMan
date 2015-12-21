@@ -7,23 +7,38 @@ import android.util.Log;
 public class DrawController {
     private DrawModel drawModel;
     private InputHandler handler;
-    private Thread handlerThread;
 
     public DrawController (DrawModel model) {
         drawModel = model;
         handler = new InputHandler(this);
-
-        handlerThread = new Thread(handler);
+        Thread thread = new Thread(handler);
+        thread.start();
     }
 
-    public void handleInput (Point p) {
-        handler.queueInput(p);
-        handlerThread.run();
+    public void handleInput (Point p, int type) {
+        handler.queueInput(p, type);
+
+    }
+
+    public void startController() {
+
+    }
+
+    public void reset() {
+        handler.clearQueue();
     }
 
     public void updateModel(Point p) {
         drawModel.updateDrawPoint(p);
     }
 
+    /*public void startController () {
+
+        handler.startHandling();
+    }
+
+    public void stopController () {
+        handler.stopHandling();
+    }*/
 
 }

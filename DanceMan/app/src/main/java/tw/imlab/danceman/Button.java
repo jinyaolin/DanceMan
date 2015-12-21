@@ -1,28 +1,19 @@
 package tw.imlab.danceman;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import android.graphics.Bitmap;
+import android.graphics.Color;
+import android.opengl.GLES20;
+import android.opengl.GLUtils;
+import android.opengl.Matrix;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.ShortBuffer;
 
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
-import android.graphics.Color;
-import android.graphics.Paint;
-import android.graphics.PorterDuff;
-import android.opengl.GLES20;
-import android.opengl.GLUtils;
-import android.opengl.Matrix;
-import android.os.Environment;
-import android.util.Log;
-
-public class DrawCanvas {
+public class Button {
     // number of coordinates per vertex in this array
+    static final int COORDS_PER_VERTEX = 3;
     private final float vertices[] = {
             0f, 0f, 0f,  // top left
             0f, 1f, 0f, // bottom left
@@ -33,7 +24,8 @@ public class DrawCanvas {
             0f, 1f,
             1f, 1f,
             1f, 0f};
-    private final short indices[] = {0, 1, 2, 0, 2, 3}; // order to draw vertices
+
+    private final short indices[] = { 0, 1, 2, 0, 2, 3 }; // order to draw vertices
 
     private final FloatBuffer vertexBuffer;
     private final FloatBuffer texCoordBuffer;
@@ -43,52 +35,25 @@ public class DrawCanvas {
     private final int mProgram;
     private int[] textureHandle = new int[1];
 
-    private Brush brush;
-    private Paint paint;
-    private Bitmap sketch;
-    private Canvas canvas;
 
-    public int positionX, positionY;
-    public int width, height;
+    private Bitmap buttonTexture;
+    private float positionX = 0.0f, positionY = 0.0f;
+    private float buttonSize = 30.0f;
+    private int color;
 
     /**
      * Sets up the drawing object data for use in an OpenGL ES context.
      */
-    public DrawCanvas(int positionX, int positionY, int width, int height) {
-        this.positionX = positionX;
-        this.positionY = positionY;
-        this.width = width;
-        this.height = height;
+    public Button(float x, float y,float size, int color) {
+        buttonSize = size;
+        positionX = x;
+        positionY = y;
+        this.color = color;
 
-        brush = new Brush();
-        paint = new Paint();
+        buttonTexture = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888);
+        buttonTexture.eraseColor(color);
 
-        String path = Environment.getExternalStorageDirectory().toString();
-        File file = new File(path, "sketch.png");
-
-        FileInputStream in = null;
-        try {
-            in = new FileInputStream(file);
-        } catch (Exception e) {
-            sketch = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-            sketch.eraseColor(Color.TRANSPARENT);
-        } finally {
-            try {
-                if (in != null) {
-                    Bitmap sketchFile = BitmapFactory.decodeStream(in);
-                    sketch = sketchFile.copy(Bitmap.Config.ARGB_8888, true);
-                    sketchFile.recycle();
-                    in.close();
-                }
-            } catch (IOException e) {
-                sketch = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-                sketch.eraseColor(Color.TRANSPARENT);
-            }
-        }
-
-        canvas = new Canvas(sketch);
-
-        // initialize byte buffer for shape coordinates
+        // initialize vertex byte buffer for shape coordinates
         ByteBuffer vertexByteBuffer = ByteBuffer.allocateDirect(vertices.length * 4);
         vertexByteBuffer.order(ByteOrder.nativeOrder());
         vertexBuffer = vertexByteBuffer.asFloatBuffer();
@@ -139,7 +104,7 @@ public class DrawCanvas {
      * Encapsulates the OpenGL ES instructions for drawing this shape.
      *
      * @param mvpMatrix - The Model View Project matrix in which to draw
-     *                  this shape.
+     * this shape.
      */
     public void draw(float[] mvpMatrix) {
         // get handle to vertex shader's vPosition member
@@ -167,10 +132,10 @@ public class DrawCanvas {
         // set up new frame
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[0]);
         // Load the bitmap into the bound texture.
-        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, sketch, 0);
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, buttonTexture, 0);
 
         int mSampler = GLES20.glGetUniformLocation (mProgram, shader.UNIFORM_TEXTURE);
-        GLES20.glUniform1i (mSampler, 0);
+        GLES20.glUniform1i(mSampler, 0);
 
         // get handle to shape's transformation matrix
         int mMVPMatrixHandle = GLES20.glGetUniformLocation(mProgram, shader.UNIFORM_MVP_MATRIX);
@@ -180,7 +145,7 @@ public class DrawCanvas {
         float transformMatrix[] = new float[16];
         Matrix.setIdentityM(transformMatrix, 0);
         Matrix.translateM(transformMatrix, 0, positionX, positionY, 0);
-        Matrix.scaleM(transformMatrix, 0, width, height, 1);
+        Matrix.scaleM(transformMatrix, 0, buttonSize, buttonSize, 1);
         Matrix.multiplyMM(transformMVPMatrix, 0, mvpMatrix, 0, transformMatrix, 0);
 
         GLES20.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, transformMVPMatrix, 0);
@@ -195,63 +160,22 @@ public class DrawCanvas {
         GLES20.glDisableVertexAttribArray(mTexCoordHandle);
     }
 
-    public void drawPoint(int x, int y) {
-        canvas.drawBitmap(brush.getStroke(), x - brush.getStrokeSize()/2 - positionX, y - brush.getStrokeSize()/2 - positionY, paint);
+    public boolean isClicked(float x, float y) {
+        if (x > positionX && y > positionY && x < positionX+buttonSize && y < positionY+buttonSize)
+            return true;
+        return false;
     }
 
-    public void saveSketch(String name) {
-        String path = Environment.getExternalStorageDirectory().toString();
-        File file = new File(path, name + ".png");
-
-        FileOutputStream out = null;
-        try {
-            out = new FileOutputStream(file);
-
-            replaceBlackIntoTransparent();
-            sketch.compress(Bitmap.CompressFormat.PNG, 100, out); // bmp is your Bitmap instance
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            try {
-                if (out != null) {
-                    out.close();
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-
+    public int getColor() {
+        return color;
     }
 
-    public void setPosition(int x, int y) {
+    public void setPostion(float x, float y) {
         positionX = x;
         positionY = y;
     }
 
-    public void setResolution(int w, int h) {
-        width = w;
-        height = h;
-        sketch.setWidth(width);
-        sketch.setHeight(height);
-    }
-
-    public void setBrushColor(int color){
-        brush.setColor(color);
-    }
-
-    public void replaceBlackIntoTransparent(){
-        int[] allpixels = new int [sketch.getHeight()*sketch.getWidth()];
-
-        sketch.getPixels(allpixels, 0, sketch.getWidth(), 0, 0, sketch.getWidth(), sketch.getHeight());
-
-        for(int i = 0; i < allpixels.length; i++)
-        {
-            if(allpixels[i] == Color.BLACK)
-            {
-                allpixels[i] = Color.TRANSPARENT;
-            }
-        }
-
-        sketch.setPixels(allpixels, 0, sketch.getWidth(), 0, 0, sketch.getWidth(), sketch.getHeight());
+    public void setButtonSize(float size) {
+        buttonSize = size;
     }
 }

@@ -8,20 +8,21 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.ShortBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.PorterDuff;
 import android.opengl.GLES20;
 import android.opengl.GLUtils;
 import android.opengl.Matrix;
 import android.os.Environment;
 import android.util.Log;
 
-public class DrawCanvas {
+public class Dancer {
     // number of coordinates per vertex in this array
     private final float vertices[] = {
             0f, 0f, 0f,  // top left
@@ -39,54 +40,29 @@ public class DrawCanvas {
     private final FloatBuffer texCoordBuffer;
     private final ShortBuffer indexBuffer;
 
-    private Shader shader;
+    private TwistShader shader;
     private final int mProgram;
     private int[] textureHandle = new int[1];
 
-    private Brush brush;
-    private Paint paint;
-    private Bitmap sketch;
-    private Canvas canvas;
+    private Bitmap image;
 
-    public int positionX, positionY;
-    public int width, height;
+    private float angle;
+    private int index;
+    private float positionX, positionY;
+    private float width, height;
 
     /**
      * Sets up the drawing object data for use in an OpenGL ES context.
      */
-    public DrawCanvas(int positionX, int positionY, int width, int height) {
+    public Dancer(int index, float positionX, float positionY) {
+        this.index = index;
         this.positionX = positionX;
         this.positionY = positionY;
-        this.width = width;
-        this.height = height;
+        this.width = 500;
+        this.height = 500;
+        angle = 0;
 
-        brush = new Brush();
-        paint = new Paint();
-
-        String path = Environment.getExternalStorageDirectory().toString();
-        File file = new File(path, "sketch.png");
-
-        FileInputStream in = null;
-        try {
-            in = new FileInputStream(file);
-        } catch (Exception e) {
-            sketch = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-            sketch.eraseColor(Color.TRANSPARENT);
-        } finally {
-            try {
-                if (in != null) {
-                    Bitmap sketchFile = BitmapFactory.decodeStream(in);
-                    sketch = sketchFile.copy(Bitmap.Config.ARGB_8888, true);
-                    sketchFile.recycle();
-                    in.close();
-                }
-            } catch (IOException e) {
-                sketch = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-                sketch.eraseColor(Color.TRANSPARENT);
-            }
-        }
-
-        canvas = new Canvas(sketch);
+        updateImage();
 
         // initialize byte buffer for shape coordinates
         ByteBuffer vertexByteBuffer = ByteBuffer.allocateDirect(vertices.length * 4);
@@ -116,6 +92,10 @@ public class DrawCanvas {
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T,
                 GLES20.GL_CLAMP_TO_EDGE);
 
+        // Load the bitmap into the bound texture.
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, image, 0);
+        image.recycle();
+
         // initialize byte buffer for the draw order list
         ByteBuffer indexByteBuffer = ByteBuffer.allocateDirect(indices.length * 2);
         indexByteBuffer.order(ByteOrder.nativeOrder());
@@ -123,7 +103,7 @@ public class DrawCanvas {
         indexBuffer.put(indices);
         indexBuffer.position(0);
 
-        shader = new Shader();
+        shader = new TwistShader();
 
         int vertexShader = shader.loadVertexShader();
         int fragmentShader = shader.loadFragmentShader();
@@ -164,13 +144,9 @@ public class DrawCanvas {
                 0, texCoordBuffer);
 
 
-        // set up new frame
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[0]);
-        // Load the bitmap into the bound texture.
-        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, sketch, 0);
-
         int mSampler = GLES20.glGetUniformLocation (mProgram, shader.UNIFORM_TEXTURE);
-        GLES20.glUniform1i (mSampler, 0);
+        GLES20.glUniform1i(mSampler, 0);
 
         // get handle to shape's transformation matrix
         int mMVPMatrixHandle = GLES20.glGetUniformLocation(mProgram, shader.UNIFORM_MVP_MATRIX);
@@ -179,8 +155,15 @@ public class DrawCanvas {
         float transformMVPMatrix[] = new float[16];
         float transformMatrix[] = new float[16];
         Matrix.setIdentityM(transformMatrix, 0);
+
+        Matrix.translateM(transformMatrix, 0, (positionX + width / 2), (positionY + height / 2), 0);
+        Matrix.rotateM(transformMatrix, 0, angle, 0, 0, 1);
+        Matrix.translateM(transformMatrix, 0, -(positionX + width/2), -(positionY + height/2), 0);
+
         Matrix.translateM(transformMatrix, 0, positionX, positionY, 0);
+
         Matrix.scaleM(transformMatrix, 0, width, height, 1);
+
         Matrix.multiplyMM(transformMVPMatrix, 0, mvpMatrix, 0, transformMatrix, 0);
 
         GLES20.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, transformMVPMatrix, 0);
@@ -195,63 +178,51 @@ public class DrawCanvas {
         GLES20.glDisableVertexAttribArray(mTexCoordHandle);
     }
 
-    public void drawPoint(int x, int y) {
-        canvas.drawBitmap(brush.getStroke(), x - brush.getStrokeSize()/2 - positionX, y - brush.getStrokeSize()/2 - positionY, paint);
-    }
 
-    public void saveSketch(String name) {
+    public void updateImage () {
         String path = Environment.getExternalStorageDirectory().toString();
-        File file = new File(path, name + ".png");
+        File file = new File(path, index + ".png");
 
-        FileOutputStream out = null;
+        FileInputStream in = null;
         try {
-            out = new FileOutputStream(file);
-
-            replaceBlackIntoTransparent();
-            sketch.compress(Bitmap.CompressFormat.PNG, 100, out); // bmp is your Bitmap instance
+            in = new FileInputStream(file);
         } catch (Exception e) {
             e.printStackTrace();
         } finally {
             try {
-                if (out != null) {
-                    out.close();
+                if (in != null) {
+                    image = BitmapFactory.decodeStream(in);
+                    in.close();
                 }
             } catch (IOException e) {
                 e.printStackTrace();
             }
         }
-
     }
 
-    public void setPosition(int x, int y) {
+    public void setAngle (float angle) {
+        this.angle = angle;
+    }
+
+    public float getAngle () {
+        return angle;
+    }
+
+    public void setPosition(float x, float y) {
         positionX = x;
         positionY = y;
     }
 
-    public void setResolution(int w, int h) {
+    public float getPositionX() {
+        return positionX;
+    }
+
+    public float getPositionY() {
+        return positionY;
+    }
+
+    public void setResolution(float w, float h) {
         width = w;
         height = h;
-        sketch.setWidth(width);
-        sketch.setHeight(height);
-    }
-
-    public void setBrushColor(int color){
-        brush.setColor(color);
-    }
-
-    public void replaceBlackIntoTransparent(){
-        int[] allpixels = new int [sketch.getHeight()*sketch.getWidth()];
-
-        sketch.getPixels(allpixels, 0, sketch.getWidth(), 0, 0, sketch.getWidth(), sketch.getHeight());
-
-        for(int i = 0; i < allpixels.length; i++)
-        {
-            if(allpixels[i] == Color.BLACK)
-            {
-                allpixels[i] = Color.TRANSPARENT;
-            }
-        }
-
-        sketch.setPixels(allpixels, 0, sketch.getWidth(), 0, 0, sketch.getWidth(), sketch.getHeight());
     }
 }
